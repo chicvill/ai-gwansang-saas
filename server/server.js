@@ -6,12 +6,17 @@ import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from '@google/genai';
 import { v4 as uuidv4 } from 'uuid';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: 'D:\\Workstation\\MQnet\\.env' });
 
 const app = express();
-const PORT = Number(process.env.PORT || 4000);
-const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5175';
+const PORT = 4000;
+const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 const rateLimitMap = new Map();
 
 const plans = {
@@ -92,7 +97,7 @@ const generateGeminiAnalysis = async (userName, imageData) => {
   const cleanBase64 = imageData.split(',')[1] || imageData;
 
   const response = await gemini.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.6-flash',
     contents: {
       parts: [
         {
@@ -145,7 +150,7 @@ const generateGeminiAnalysis = async (userName, imageData) => {
 
 const saveUserToDb = async (tenantId, user) => {
   if (!supabase) return null;
-  const { data, error } = await supabase.from('users').upsert({
+  const { data, error } = await supabase.from('gwansang_users').upsert({
     id: user.id,
     tenant_id: tenantId,
     full_name: user.fullName,
@@ -163,7 +168,7 @@ const saveUserToDb = async (tenantId, user) => {
 
 const saveSessionToDb = async (tenantId, session) => {
   if (!supabase) return null;
-  const { data, error } = await supabase.from('sessions').insert({
+  const { data, error } = await supabase.from('gwansang_sessions').insert({
     id: session.sessionId,
     tenant_id: tenantId,
     user_name: session.userName,
@@ -246,7 +251,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -376,6 +381,10 @@ app.post('/api/billing/checkout', async (req, res) => {
 });
 
 app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) {
+    return next();
+  }
+
   if (req.path.startsWith('/api/auth') || req.path === '/api/health' || req.path === '/api/plans') {
     return next();
   }
@@ -439,6 +448,7 @@ app.post('/api/analyze', async (req, res) => {
     session.lastResult = result;
     return res.json({ ok: true, result });
   } catch (error) {
+    console.error('[GEMINI_ERROR]', error);
     const fallback = generateMockAnalysis(userName);
     session.lastResult = fallback;
     return res.json({ ok: true, result: fallback, warning: 'Gemini 연결 실패, mock 결과를 반환했습니다.' });
@@ -458,6 +468,13 @@ app.get('/api/tenants/:tenantId/sessions', (req, res) => {
     tenantId,
     sessions: tenant.sessions,
   });
+});
+
+// Serve frontend in production
+app.use(express.static(path.join(__dirname, '../dist')));
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
 });
 
 app.use((req, res) => {
